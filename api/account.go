@@ -65,7 +65,7 @@ func (server *Server) listAccount(ctx *gin.Context) {
 		Offset: (req.PageID - 1) * req.PageSize,
 	}
 
-	accounts, err := server.store.ListAccounts(ctx, arg)
+	account, err := server.store.ListAccounts(ctx, arg)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			ctx.JSON(http.StatusNotFound, errorResponse(err))
@@ -74,5 +74,8 @@ func (server *Server) listAccount(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
 		return
 	}
-	ctx.JSON(http.StatusOK, accounts)
+
+	// account = db.Account{} // change this account to an empty object 
+
+	ctx.JSON(http.StatusOK, account)
 }

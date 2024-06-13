@@ -4,7 +4,7 @@ createdb:
 	docker exec -it postgres12 createdb --username=root --owner=root simple_bank
 
 dropdb:
-	docker exec -it postgres12 dropdb simeple_bank
+	docker exec -it postgres12 dropdb simple_bank
 
 migrateup:
 	migrate -path db/migration -database "postgresql://root:secret@localhost:5434/simple_bank?sslmode=disable" -verbose up
@@ -19,6 +19,9 @@ test:
 	go test -v -cover ./...
 
 server:
-	go run main.go
+	air
 
-.PHONY: postgres createdb dropdb migrateup migratedown sqlc test server
+mock:
+	mockgen -package mockdb -destination db/mock/store.go github.com/techschool/simplebank/db/sqlc Store
+
+.PHONY: postgres createdb dropdb migrateup migratedown sqlc test server mock
