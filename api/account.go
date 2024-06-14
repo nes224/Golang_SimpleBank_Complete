@@ -2,9 +2,11 @@ package api
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	request "github.com/techschool/simplebank/api/request"
 	db "github.com/techschool/simplebank/db/sqlc"
 )
@@ -27,6 +29,13 @@ func (server *Server) createAccount(ctx *gin.Context) { // server * Server point
 
 	account, err := server.store.CreateAccount(ctx, arg)
 	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok {
+			switch pqErr.Code.Name() {
+			case "foreign_key_violation", "unique_violation":
+				ctx.JSON(http.StatusForbidden, errorResponse(err))
+				return
+			}
+		}
 		ctx.JSON(http.StatusInternalServerError, errorResponse(err))
 		return
 	}
@@ -52,7 +61,6 @@ func (server *Server) getAccount(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, account)
 }
 
-
 func (server *Server) listAccount(ctx *gin.Context) {
 	var req request.ListAccountRequest
 	if err := ctx.ShouldBindQuery(&req); err != nil {
@@ -61,7 +69,7 @@ func (server *Server) listAccount(ctx *gin.Context) {
 	}
 
 	arg := db.ListAccountsParams{
-		Limit: req.PageSize,
+		Limit:  req.PageSize,
 		Offset: (req.PageID - 1) * req.PageSize,
 	}
 
@@ -75,7 +83,7 @@ func (server *Server) listAccount(ctx *gin.Context) {
 		return
 	}
 
-	// account = db.Account{} // change this account to an empty object 
+	// account = db.Account{} // change this account to an empty object
 
 	ctx.JSON(http.StatusOK, account)
 }
