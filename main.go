@@ -12,8 +12,8 @@ import (
 	"github.com/techschool/simplebank/pb"
 	"github.com/techschool/simplebank/util"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
 )
+import "google.golang.org/grpc/reflection"
 
 func main() {
 	config, err := util.LoadConfig(".")
@@ -37,8 +37,10 @@ func runGrpcServer(config util.Config, store db.Store) {
 		log.Fatal("cannot create server.")
 	}
 	grpcServer := grpc.NewServer()
+
 	pb.RegisterSimpleBankServer(grpcServer, server)
-	reflection.Register(grpcServer) // it allows the gRPC client to easily explore what RPCs are available on the server, and how to call them.
+	// it allows the gRPC client to easily explore what RPCs are available on the server, and how to call them.
+	reflection.Register(grpcServer) 
 
 	listener, err := net.Listen("tcp", config.GRPCServerAddress)
 	if err != nil {

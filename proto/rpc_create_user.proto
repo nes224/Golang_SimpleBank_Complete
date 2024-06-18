@@ -1,14 +1,13 @@
 syntax = "proto3";
 
-package pb; 
+package pb;
 
 import "user.proto";
 
-option go_package = "github.com/techschool/simplebank/pb"; 
+option go_package = "github.com/techschool/simplebank/pb";
 
-// here we're just defining the request and response data structure of the API.
-message CreateUserRequest { 
-    string useranem = 1;
+message CreateUserRequest {
+    string username = 1;
     string full_name = 2;
     string email = 3;
     string password = 4;
@@ -17,5 +16,3 @@ message CreateUserRequest {
 message CreateUserResponse {
     User user = 1;
 }
-
-// We will have to declare a gRPC service and add the RPC definition of that API.
