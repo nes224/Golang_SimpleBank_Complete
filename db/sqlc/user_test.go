@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 	"github.com/techschool/simplebank/util"
 )
@@ -49,4 +50,72 @@ func TestGetUser(t *testing.T) {
 	require.Equal(t, user1.Email, user2.Email)
 	require.WithinDuration(t, user1.PasswordChangedAt.Time, user2.PasswordChangedAt.Time, time.Second)
 	require.WithinDuration(t, user1.CreatedAt.Time, user2.CreatedAt.Time, time.Second) // check that 2 timestamps are differenct at most some delta duration.
+}
+
+func TestUpdateUserOnlyFullName(t *testing.T) {
+	oldUser := createRandomUser(t)
+	newFullName := util.RandomOwner()
+	updatedUser, err := testStore.UpdateUser(context.Background(), UpdateUserParams{
+		Username: oldUser.Username,
+		FullName: pgtype.Text{String: newFullName, Valid: true},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, oldUser.FullName, updatedUser.FullName)
+	require.Equal(t, newFullName, updatedUser.FullName)
+	require.Equal(t, oldUser.Email, updatedUser.Email)
+	require.Equal(t, oldUser.HashedPassword, updatedUser.HashedPassword)
+}
+
+func TestUpdateUserOnlyEmail(t *testing.T) {
+	oldEmail := createRandomUser(t)
+	newEmail := util.RandomEmail()
+	updateEmail, err := testStore.UpdateUser(context.Background(), UpdateUserParams{
+		Username: oldEmail.Username,
+		Email:    pgtype.Text{String: newEmail, Valid: true},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, oldEmail.Email, updateEmail.Email)
+	require.Equal(t, newEmail, updateEmail.Email)
+	require.Equal(t, oldEmail.FullName, updateEmail.FullName)
+	require.Equal(t, oldEmail.HashedPassword, updateEmail.HashedPassword)
+}
+
+func TestUpdateUserOnlyPassword(t *testing.T) {
+	oldPassword := createRandomUser(t)
+	newPassword := util.RandomString(6)
+	newHashedPassword, err := util.HashPassworod(newPassword)
+	require.NoError(t, err)
+	updatePassword, err := testStore.UpdateUser(context.Background(), UpdateUserParams{
+		Username:       oldPassword.Username,
+		HashedPassword: pgtype.Text{String: newHashedPassword, Valid: true},
+	})
+
+	require.NoError(t, err)
+	require.NotEqual(t, oldPassword, newPassword)
+	require.Equal(t, newHashedPassword, updatePassword.HashedPassword)
+	require.Equal(t, oldPassword.FullName, updatePassword.FullName)
+	require.Equal(t, oldPassword.Email, updatePassword.Email)
+}
+
+func TestUpdateUserAllFields(t *testing.T) {
+	oldUser := createRandomUser(t)
+	newFullname := util.RandomOwner()
+	newEmail := util.RandomEmail()
+	newPassword := util.RandomString(6)
+	hashedPassword, err := util.HashPassworod(newPassword)
+	require.NoError(t, err)
+	updateUser, err := testStore.UpdateUser(context.Background(), UpdateUserParams{
+		Username:       oldUser.Username,
+		FullName:       pgtype.Text{String: newFullname, Valid: true},
+		Email:          pgtype.Text{String: newEmail, Valid: true},
+		HashedPassword: pgtype.Text{String: hashedPassword, Valid: true},
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, oldUser.FullName, updateUser.FullName)
+	require.NotEqual(t, oldUser.Email, updateUser.Email)
+	require.NotEqual(t, oldUser.HashedPassword, updateUser.HashedPassword)
+
+	require.Equal(t, newFullname, updateUser.FullName)
+	require.Equal(t, newEmail, updateUser.Email)
+	require.Equal(t, hashedPassword, updateUser.HashedPassword)
 }
