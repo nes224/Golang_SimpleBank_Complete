@@ -2,12 +2,15 @@ package gapi
 
 import (
 	"context"
+	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/lib/pq"
 	db "github.com/techschool/simplebank/db/sqlc"
 	"github.com/techschool/simplebank/pb"
 	"github.com/techschool/simplebank/util"
 	"github.com/techschool/simplebank/val"
+	"github.com/techschool/simplebank/worker"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,13 +26,28 @@ func (server *Server) CreateUser(ctx context.Context, req *pb.CreateUserRequest)
 		return nil, status.Errorf(codes.Internal, "failed to hash password: %s", err)
 	}
 
-	arg := db.CreateUserParams{
-		Username:       req.GetUsername(),
-		HashedPassword: hashedPassword,
-		FullName:       req.GetFullName(),
-		Email:          req.GetEmail(),
+	arg := db.CreateUserTxParams{
+		CreateUserParams: db.CreateUserParams{
+			Username:       req.GetUsername(),
+			HashedPassword: hashedPassword,
+			FullName:       req.GetFullName(),
+			Email:          req.GetEmail(),
+		},
+		AfterCreate: func(user db.User) error {
+			// TODO: use db transaction
+			taskPayload := &worker.PayloadSendVerifyEmail{
+				Username: user.Username,
+			}
+			opts := []asynq.Option{
+				asynq.MaxRetry(10),                // This means we only allow the tasks to be retried at most 10 times if it fails.
+				asynq.ProcessIn(10 * time.Second), // This will add some kind of delay to the task, so that it will only be pciked up by the processor after 10 seconds.
+				asynq.Queue(worker.QueueCritical), // if you have multiple tasks with different priority levels, You can use the asynq.Queue() option to send them to different queues.
+			}
+
+			return server.taskDistributor.DistributeTaskSendVerifyEmail(ctx, taskPayload, opts...)
+		},
 	}
-	user, err := server.store.CreateUser(ctx, arg)
+	txResult, err := server.store.CreateUserTx(ctx, arg)
 	if err != nil {
 		if pgErr, ok := err.(*pq.Error); ok {
 			switch pgErr.Code.Name() {
@@ -39,8 +57,9 @@ func (server *Server) CreateUser(ctx context.Context, req *pb.CreateUserRequest)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to create user: %s", err)
 	}
+
 	rsp := &pb.CreateUserResponse{
-		User: convertUser(user),
+		User: convertUser(txResult.User),
 	}
 	return rsp, nil
 }

@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
 	"net"
 	"net/http"
+	"os"
+
+	"github.com/hibiken/asynq"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -18,6 +22,7 @@ import (
 	"github.com/techschool/simplebank/gapi"
 	"github.com/techschool/simplebank/pb"
 	"github.com/techschool/simplebank/util"
+	"github.com/techschool/simplebank/worker"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -26,42 +31,69 @@ import (
 func main() {
 	config, err := util.LoadConfig(".")
 	if err != nil {
-		log.Fatal("cannot load config")
+		log.Fatal().Msg("cannot load config")
+	}
+
+	if config.Environment == "development" {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
 
 	connPool, err := pgxpool.New(context.Background(), config.DBSource)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal().Msg("cannot connect to db")
 	}
 
 	// run db migration
 	runDBMigration(config.MigrationURL, config.DBSource)
 
 	store := db.NewStore(connPool)
-	go runGatewayServer(config, store)
-	runGrpcServer(config, store)
+
+	redisOpt := asynq.RedisClientOpt{
+		Addr: config.RedisAddress,
+	}
+	// with Redis option we can create a new task distributor
+	// by calling worker.NewRedisTaskDistributor()
+	taskDistributor := worker.NewRedisTaskDistributor(redisOpt)
+	// runTaskProcessor in a seprate go routine because when the processor starts, 
+	// the Asynq server will block and keep polling Redis for new tasks.
+	go runTaskProcessor(redisOpt, store)
+	go runGatewayServer(config, store,taskDistributor)
+	runGrpcServer(config, store,taskDistributor)
 
 }
 
 func runDBMigration(migrationURL string, dbSource string) {
 	migration, err := migrate.New(migrationURL, dbSource)
 	if err != nil {
-		log.Fatal("cannot create new migrate instance:", err)
+		log.Fatal().Msg("cannot create new migrate instance:")
 	}
 
 	if err = migration.Up(); err != nil && err != migrate.ErrNoChange {
-		log.Fatal("failed to run migrate up:", err)
+		log.Fatal().Msg("failed to run migrate up:")
 	}
 
-	log.Println("db migrated successfully")
+	log.Info().Msg("db migrated successfully")
 }
 
-func runGrpcServer(config util.Config, store db.Store) {
-	server, err := gapi.NewServer(config, store)
+// A redis option of type asynq.RedisClientOpt to know how to connecto redis,
+// And a store of type db.Store to be able to talk to the database.
+func runTaskProcessor(redisOpt asynq.RedisClientOpt, store db.Store) {
+	taskProcess := worker.NewRedisTaskProcessor(redisOpt, store)
+	log.Info().Msg("start task processor")
+	err := taskProcess.Start()
 	if err != nil {
-		log.Fatal("cannot create server:", err)
+		log.Fatal().Err(err).Msg("failed to start task processor")
 	}
-	grpcServer := grpc.NewServer()
+}
+
+func runGrpcServer(config util.Config, store db.Store, taskDistributor worker.TaskDistributor) {
+	server, err := gapi.NewServer(config, store, taskDistributor)
+	if err != nil {
+		log.Fatal().Msg("cannot create server")
+	}
+	
+	grpcLogger := grpc.UnaryInterceptor(gapi.GrpcLogger) // unary interceptor to write the logs.
+	grpcServer := grpc.NewServer(grpcLogger)
 
 	pb.RegisterSimpleBankServer(grpcServer, server)
 	// it allows the gRPC client to easily explore what RPCs are available on the server, and how to call them.
@@ -69,20 +101,20 @@ func runGrpcServer(config util.Config, store db.Store) {
 
 	listener, err := net.Listen("tcp", config.GRPCServerAddress)
 	if err != nil {
-		log.Fatal("cannot create listener:", err)
+		log.Fatal().Err(err).Msg("cannot create listener")
 	}
 
 	log.Printf("start gRPC server at %s", listener.Addr().String())
 	err = grpcServer.Serve(listener)
 	if err != nil {
-		log.Fatal("cannot start gRPC server")
+		log.Fatal().Msg("cannot start gRPC server")
 	}
 }
 
-func runGatewayServer(config util.Config, store db.Store) {
-	server, err := gapi.NewServer(config, store)
+func runGatewayServer(config util.Config, store db.Store, taskDistributor worker.TaskDistributor) {
+	server, err := gapi.NewServer(config, store, taskDistributor)
 	if err != nil {
-		log.Fatal("cannot create server.")
+		log.Fatal().Msg("cannot create server.")
 	}
 
 	// enable snake case for our gRPC gateway server.
@@ -100,7 +132,7 @@ func runGatewayServer(config util.Config, store db.Store) {
 	defer cancel()
 	err = pb.RegisterSimpleBankHandlerServer(ctx, grpcMux, server)
 	if err != nil {
-		log.Fatal("cannot register handler server:", err)
+		log.Fatal().Msg("cannot register handler server")
 	}
 
 	mux := http.NewServeMux() // This mux will actually receive HTTP requests from clients.
@@ -108,7 +140,7 @@ func runGatewayServer(config util.Config, store db.Store) {
 
 	statikFS, err := fs.New()
 	if err != nil {
-		log.Fatal("cannot create statik fs:", err)
+		log.Fatal().Msg("cannot create statik fs")
 	}
 
 	swaggerHandler := http.StripPrefix("/swagger/", http.FileServer(statikFS))
@@ -116,23 +148,24 @@ func runGatewayServer(config util.Config, store db.Store) {
 
 	listener, err := net.Listen("tcp", config.HTTPServerAddress)
 	if err != nil {
-		log.Fatal("cannot create listener")
+		log.Fatal().Msg("cannot create listener")
 	}
 
 	log.Printf("start HTTP gateway server at %s", listener.Addr().String())
-	err = http.Serve(listener, mux)
+	handler := gapi.HttpLogger(mux)
+	err = http.Serve(listener, handler)
 	if err != nil {
-		log.Fatal("cannot start HTTP gateway server:", err)
+		log.Fatal().Msg("cannot start HTTP gateway server")
 	}
 }
 
 func runGinServer(config util.Config, store db.Store) {
 	server, err := api.NewServer(config, store)
 	if err != nil {
-		log.Fatal("cannot create server.")
+		log.Fatal().Msg("cannot create server.")
 	}
 	err = server.Start(config.HTTPServerAddress)
 	if err != nil {
-		log.Fatal("cannot start server:", err)
+		log.Fatal().Msg("cannot start server")
 	}
 }

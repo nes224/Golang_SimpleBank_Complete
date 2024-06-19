@@ -9,7 +9,7 @@ import (
 var (
 	isValidUsername = regexp.MustCompile(`^[a-z0-9_]+$`).MatchString //  regexp.MustCompile function to define its format using regular expressions.
 	// + plus character this means that any character inside the square bracket can appear one or more times in the string.
-	isValidFullName = regexp.MustCompile(`^[a-zA-Z\\s]+s`).MatchString // In Go, we use the double backslashes followed by an s to represent any space character.
+	isValidFullName = regexp.MustCompile(`^[a-zA-Z\s]+s`).MatchString // In Go, we use the double backslashes followed by an s to represent any space character.
 )
 
 func ValidateString(value string, minLength int, maxLength int ) error {
