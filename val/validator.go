@@ -9,15 +9,15 @@ import (
 var (
 	isValidUsername = regexp.MustCompile(`^[a-z0-9_]+$`).MatchString //  regexp.MustCompile function to define its format using regular expressions.
 	// + plus character this means that any character inside the square bracket can appear one or more times in the string.
-	isValidFullName = regexp.MustCompile(`^[a-zA-Z\s]+s`).MatchString // In Go, we use the double backslashes followed by an s to represent any space character.
+	isValidFullName = regexp.MustCompile(`^[a-zA-Z\s]+$`).MatchString // In Go, we use the double backslashes followed by an s to represent any space character.
 )
 
-func ValidateString(value string, minLength int, maxLength int ) error {
+func ValidateString(value string, minLength int, maxLength int) error {
 	n := len(value)
 	if n < minLength || n > maxLength {
-		return fmt.Errorf("must contain from %-%d characters", minLength, maxLength)
+		return fmt.Errorf("must contain from %d-%d characters", minLength, maxLength)
 	}
-	return nil 
+	return nil
 }
 
 func ValidateUsername(value string) error {
@@ -52,4 +52,15 @@ func ValidateEmail(value string) error {
 		return fmt.Errorf("is not a valid email address")
 	}
 	return nil
+}
+
+func ValidateEmailId(value int64) error {
+	if value <= 0 {
+		return fmt.Errorf("must be a positive integer")
+	}
+	return nil
+}
+
+func ValidateSecretCode(value string) error {
+	return ValidateString(value, 32, 128)
 }

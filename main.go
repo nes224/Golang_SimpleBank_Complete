@@ -20,6 +20,7 @@ import (
 	db "github.com/techschool/simplebank/db/sqlc"
 	_ "github.com/techschool/simplebank/doc/statik"
 	"github.com/techschool/simplebank/gapi"
+	"github.com/techschool/simplebank/mail"
 	"github.com/techschool/simplebank/pb"
 	"github.com/techschool/simplebank/util"
 	"github.com/techschool/simplebank/worker"
@@ -56,7 +57,7 @@ func main() {
 	taskDistributor := worker.NewRedisTaskDistributor(redisOpt)
 	// runTaskProcessor in a seprate go routine because when the processor starts, 
 	// the Asynq server will block and keep polling Redis for new tasks.
-	go runTaskProcessor(redisOpt, store)
+	go runTaskProcessor(config,redisOpt, store)
 	go runGatewayServer(config, store,taskDistributor)
 	runGrpcServer(config, store,taskDistributor)
 
@@ -77,8 +78,9 @@ func runDBMigration(migrationURL string, dbSource string) {
 
 // A redis option of type asynq.RedisClientOpt to know how to connecto redis,
 // And a store of type db.Store to be able to talk to the database.
-func runTaskProcessor(redisOpt asynq.RedisClientOpt, store db.Store) {
-	taskProcess := worker.NewRedisTaskProcessor(redisOpt, store)
+func runTaskProcessor(config util.Config,redisOpt asynq.RedisClientOpt, store db.Store) {
+	mailer := mail.NewGmailSender(config.EmailSenderName, config.EmailSenderAddress, config.EmailSenderPassword)
+	taskProcess := worker.NewRedisTaskProcessor(redisOpt, store, mailer)
 	log.Info().Msg("start task processor")
 	err := taskProcess.Start()
 	if err != nil {
